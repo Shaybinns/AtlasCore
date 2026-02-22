@@ -10,6 +10,7 @@ from memory.long_term_db import save_result, get_user_facts
 from memory.knowledge_memory import get_vector_matches
 from llm_model import call_gpt
 from command_checker import extract_command_from_text
+from atlas_intent import detect_atlas_intent
 from memory.data_collector import (
     needs_more_input, receive_input, start_data_collection
 )
@@ -92,7 +93,8 @@ def handle_user_message(user_id: str, message: str) -> dict:
 User: {message}
 {task_reminder}
 """
-    reply = call_gpt(system_prompt, context)
+    atlas_type = detect_atlas_intent(message)
+    reply = call_gpt(system_prompt, context, atlas_type=atlas_type)
 
     # STEP 4: Extract goal from reply
     goal = None
@@ -266,7 +268,8 @@ def generate_ai_response_only(user_id: str, message: str) -> str:
 You are replying directly to the user's message, which is - User: {message}
 {task_reminder}
 """
-    reply = call_gpt(system_prompt, context)
+    atlas_type = detect_atlas_intent(message)
+    reply = call_gpt(system_prompt, context, atlas_type=atlas_type)
     
     # STEP 4: Extract goal from reply
     goal = None
