@@ -1,37 +1,68 @@
+"""
+Data collection state: persisted in short_term current_cache so the agent stays stateful across restarts.
+"""
+from memory.short_term_cache import get_current_cache, update_current_cache
 from utils.field_extraction import extract_fields_from_text
 
-waiting_inputs = {}  # user_id → {command, args, missing_fields, field_meta}
+DATA_COLLECTION_KEY = "data_collection"
 
-def needs_more_input(user_id):
-    return user_id in waiting_inputs
 
-def start_data_collection(user_id, command_name, args, missing_fields, required_fields):
-    waiting_inputs[user_id] = {
-        "command": command_name,
-        "args": args,
-        "missing": missing_fields,
-        "field_meta": required_fields
-    }
+def needs_more_input(user_id: str) -> bool:
+    """True if this user has an active data-collection session in cache."""
+    cache = get_current_cache(user_id)
+    entry = cache.get(DATA_COLLECTION_KEY)
+    return entry is not None and isinstance(entry, dict) and entry.get("missing")
 
-def receive_input(user_id, user_message):
-    if user_id not in waiting_inputs:
+
+def start_data_collection(user_id: str, command_name: str, args: dict, missing_fields: list, required_fields: dict):
+    """Start collecting missing fields; store in short_term cache."""
+    # required_fields may be dict or list; ensure JSON-serializable
+    if isinstance(required_fields, dict):
+        field_meta = {k: v if isinstance(v, (str, int, float, bool, type(None))) else str(v) for k, v in required_fields.items()}
+    else:
+        field_meta = list(required_fields) if required_fields else []
+    update_current_cache(user_id, {
+        DATA_COLLECTION_KEY: {
+            "command": command_name,
+            "args": dict(args),
+            "missing": list(missing_fields),
+            "field_meta": field_meta,
+        }
+    })
+
+
+def receive_input(user_id: str, user_message: str):
+    """
+    Process user message against current data collection.
+    Returns the filled command dict when all missing fields are filled; otherwise None.
+    """
+    cache = get_current_cache(user_id)
+    entry = cache.get(DATA_COLLECTION_KEY)
+    if not entry or not isinstance(entry, dict) or not entry.get("missing"):
         return None
 
-    entry = waiting_inputs[user_id]
-    args = entry["args"]
-    required_fields = entry["field_meta"]
-    missing = entry["missing"]
+    args = dict(entry["args"])
+    required_fields = entry.get("field_meta") or {}
+    missing = list(entry["missing"])
 
-    # 🔍 Use GPT to extract available fields from message
     extracted = extract_fields_from_text(user_message, required_fields)
-
     for key, value in extracted.items():
         if key in missing:
             args[key] = value
             missing.remove(key)
 
-    # ✅ If all fields filled, return full command
     if not missing:
-        return waiting_inputs.pop(user_id)
+        # All filled: clear data_collection and return the command payload
+        update_current_cache(user_id, {DATA_COLLECTION_KEY: None})
+        return {"command": entry["command"], "args": args, "missing": [], "field_meta": required_fields}
 
-    return None  # Still collecting
+    # Still missing: update cache with new args/missing
+    update_current_cache(user_id, {
+        DATA_COLLECTION_KEY: {
+            "command": entry["command"],
+            "args": args,
+            "missing": missing,
+            "field_meta": required_fields,
+        }
+    })
+    return None

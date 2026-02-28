@@ -51,7 +51,7 @@ def handle_user_message(user_id: str, message: str) -> dict:
                 try:
                     result = run_command(filled["command"], filled["args"])
                     summary = summarise_result(filled["command"], result)
-                    save_result(user_id, summary)
+                    save_result(user_id, summary, filled["command"])
                     output = summarise_output(filled["command"], message, result)
                     reply = f"Thanks! I've got everything I need.\n\n{output}"
                 except Exception as e:
@@ -200,7 +200,7 @@ User: {message}
                 # Simple command without dependencies - execute normally
                 result = run_command(command_name, args)
                 summary = summarise_result(command_name, result)
-                save_result(user_id, summary)
+                save_result(user_id, summary, command_name)
                 output = summarise_output(command_name, message, result)
 
                 follow_up = f"[Task Complete]\n{output}"
@@ -361,7 +361,7 @@ def execute_command_streaming(command_name: str, args: dict, user_id: str, messa
             # Simple command without dependencies - execute normally
             result = run_command(command_name, args)
             summary = summarise_result(command_name, result)
-            save_result(user_id, summary)
+            save_result(user_id, summary, command_name)
             output = summarise_output(command_name, message, result)
             
             follow_up = f"[Task Complete]\n{output}"

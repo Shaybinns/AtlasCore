@@ -221,7 +221,7 @@ def execute_complete_stack(user_id, command_engine):
                 
                 # Save result to long-term memory
                 summary = summarise_result(command["command"], result)
-                save_result(user_id, summary)
+                save_result(user_id, summary, command["command"])
                 
                 # Store result for later use
                 results.append({
