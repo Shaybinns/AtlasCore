@@ -18,6 +18,9 @@ OPENROUTER_API_KEY=your_openrouter_api_key_here
 # Database Configuration
 DATABASE_URL=sqlite:///investcore.db
 
+# InvestCore read-only (for retrieve_market_data command)
+INVESTCORE_DATABASE_URL=postgresql://user:pass@host:5432/investcore
+
 # CORS Configuration
 CORS_ORIGINS=*
 
