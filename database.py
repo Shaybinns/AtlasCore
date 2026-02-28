@@ -1,7 +1,8 @@
 """
 Database Layer — PostgreSQL integration for Atlas stateful agent.
 
-2 tables:
+3 tables:
+  users             — auth + chat history (email, password, full_name, recent_messages JSONB)
   short_term_memory — recent_messages (JSONB), current_cache (JSONB), expires_at
   long_term_memory  — facts (TEXT), recent_results (JSONB)
 
@@ -53,7 +54,19 @@ def init_database():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            email           VARCHAR(255) NOT NULL UNIQUE,
+            password        VARCHAR(255),
+            full_name       VARCHAR(255),
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            recent_messages JSONB NOT NULL DEFAULT '[]'
+        )
+    """)
+
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_short_term_expires_at ON short_term_memory (expires_at)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
 
     conn.commit()
     cursor.close()

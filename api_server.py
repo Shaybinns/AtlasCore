@@ -62,8 +62,12 @@ def root():
         "railway": "ready",
         "available_endpoints": [
             "/api/health",
-            "/api/chat", 
+            "/api/chat",
             "/api/chat/stream",
+            "/api/auth/register",
+            "/api/auth/login",
+            "/api/auth/me",
+            "/api/auth/history",
             "/api/asset/<symbol>",
             "/api/screen",
             "/api/market/assess",
@@ -74,7 +78,7 @@ def root():
             "/api/macros",
             "/api/search/web"
         ],
-        "total_endpoints": 12
+        "total_endpoints": 16
     })
 
 @app.route("/api/railway/status")
@@ -118,7 +122,19 @@ def chat():
                 "success": False,
                 "railway_status": "brain_module_unavailable"
             }), 503  # Service Unavailable
-        
+
+        # If registered user, persist to users.recent_messages for /api/auth/history
+        try:
+            from user_tracking import is_user_active, add_message
+            if is_user_active(user_id):
+                add_message(user_id, "user", message)
+                reply = response_data.get("initial_response") or ""
+                if response_data.get("command_result"):
+                    reply += "\n\n" + (response_data.get("command_result") or "")
+                add_message(user_id, "assistant", reply)
+        except Exception:
+            pass
+
         # Return structured response for backward compatibility
         return jsonify({
             "success": True,
@@ -177,10 +193,11 @@ def chat_stream():
                 if isinstance(ai_response_data, tuple):
                     # Command detected
                     ai_response, command_name, args, goal = ai_response_data
+                    command_result = None  # set after execute
                 else:
                     # No command, just conversation
                     ai_response = ai_response_data
-                    command_name, args, goal = None, None, None
+                    command_name, args, goal, command_result = None, None, None, None
                 
                 # STEP 2: Stream the AI response immediately
                 if ai_response:
@@ -238,6 +255,20 @@ def chat_stream():
                         "error": None,
                         "timestamp": time.time()
                     }) + "\n"
+
+                # If registered user, persist to users.recent_messages for /api/auth/history
+                full_reply = ai_response or ""
+                if command_name:
+                    cmd_res = command_result.get("command_result") if command_name else None
+                    if cmd_res:
+                        full_reply += "\n\n" + (cmd_res if isinstance(cmd_res, str) else json.dumps(cmd_res))
+                try:
+                    from user_tracking import is_user_active, add_message
+                    if is_user_active(user_id):
+                        add_message(user_id, "user", message)
+                        add_message(user_id, "assistant", full_reply)
+                except Exception:
+                    pass
                 
                 # Send completion
                 yield json.dumps({
@@ -538,6 +569,116 @@ def search_web():
         }), 500
 
 # ============================================================================
+# AUTH ENDPOINTS
+# ============================================================================
+
+@app.route("/api/auth/register", methods=["POST"])
+def auth_register():
+    """
+    Register a new user.
+    Body: { "email": "...", "password": "...", "full_name": "..." }
+    Returns: { "success": true, "user_id": "...", "email": "...", "full_name": "...", "created_at": "..." }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
+        email = (data.get("email") or "").strip()
+        password = data.get("password") or ""
+        full_name = (data.get("full_name") or "").strip()
+        if not email:
+            return jsonify({"error": "Missing email"}), 400
+        if not password:
+            return jsonify({"error": "Missing password"}), 400
+        if not full_name:
+            return jsonify({"error": "Missing full_name"}), 400
+
+        from user_tracking import create_user
+        try:
+            user = create_user(email=email, password=password, full_name=full_name)
+        except ValueError as ve:
+            return jsonify({"error": str(ve), "success": False}), 409
+
+        if not user:
+            return jsonify({"error": "Failed to create user", "success": False}), 500
+        return jsonify({"success": True, **user}), 201
+    except Exception as e:
+        return jsonify({"error": str(e), "success": False}), 500
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    """
+    Authenticate user.
+    Body: { "email": "...", "password": "..." }
+    Returns: { "success": true, "user_id": "...", "email": "...", "full_name": "...", "created_at": "..." }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
+        email = (data.get("email") or "").strip()
+        password = data.get("password") or ""
+        if not email:
+            return jsonify({"error": "Missing email"}), 400
+        if not password:
+            return jsonify({"error": "Missing password"}), 400
+
+        from user_tracking import get_user_by_email, verify_password
+        user = get_user_by_email(email)
+        if not user:
+            return jsonify({"error": "Email not found", "success": False}), 404
+        if not verify_password(password, user.get("password", "")):
+            return jsonify({"error": "Invalid password", "success": False}), 401
+        out = {"success": True, "user_id": user["user_id"], "email": user["email"], "full_name": user["full_name"], "created_at": user["created_at"]}
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({"error": str(e), "success": False}), 500
+
+
+@app.route("/api/auth/me", methods=["GET"])
+def auth_me():
+    """Get profile for user. Query: ?user_id=<uuid>"""
+    try:
+        user_id = (request.args.get("user_id") or "").strip()
+        if not user_id:
+            return jsonify({"error": "Missing user_id"}), 400
+        from user_tracking import get_user_by_id
+        user = get_user_by_id(user_id)
+        if not user:
+            return jsonify({"error": "User not found", "success": False}), 404
+        return jsonify({"success": True, **user})
+    except Exception as e:
+        return jsonify({"error": str(e), "success": False}), 500
+
+
+@app.route("/api/auth/history", methods=["GET", "DELETE"])
+def auth_history():
+    """
+    GET:  Return recent message history. Query: ?user_id=<uuid>
+    DELETE: Clear message history. Body: { "user_id": "<uuid>" }
+    """
+    try:
+        if request.method == "GET":
+            user_id = (request.args.get("user_id") or "").strip()
+        else:
+            data = request.get_json() or {}
+            user_id = (data.get("user_id") or "").strip()
+        if not user_id:
+            return jsonify({"error": "Missing user_id"}), 400
+        from user_tracking import get_messages, clear_messages, is_user_active
+        if not is_user_active(user_id):
+            return jsonify({"error": "User not found", "success": False}), 404
+        if request.method == "GET":
+            messages = get_messages(user_id)
+            return jsonify({"success": True, "user_id": user_id, "messages": messages})
+        clear_messages(user_id)
+        return jsonify({"success": True, "user_id": user_id, "message": "History cleared"})
+    except Exception as e:
+        return jsonify({"error": str(e), "success": False}), 500
+
+
+# ============================================================================
 # ERROR HANDLERS
 # ============================================================================
 
@@ -549,6 +690,11 @@ def not_found(error):
         "available_endpoints": [
             "/api/health",
             "/api/chat",
+            "/api/chat/stream",
+            "/api/auth/register",
+            "/api/auth/login",
+            "/api/auth/me",
+            "/api/auth/history",
             "/api/asset/<symbol>",
             "/api/screen",
             "/api/market/assess",
