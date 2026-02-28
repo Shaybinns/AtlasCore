@@ -2,22 +2,17 @@
 Long-term memory: user facts and recent command results for stateful agent.
 Postgres-backed; use DATABASE_URL (e.g. Railway).
 """
-import psycopg2
 import os
+import sys
 import json
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
-from dotenv import load_dotenv
-load_dotenv()
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from database import get_db_connection
 
 LONG_TERM_DB = "long_term_memory"
 MAX_RECENT_RESULTS = 50
-
-
-def get_db_connection():
-    """Connection using Railway-injected DATABASE_URL."""
-    return psycopg2.connect(os.getenv("DATABASE_URL"))
 
 
 def get_user_facts(user_id: str) -> str:

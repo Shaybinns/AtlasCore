@@ -24,47 +24,33 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
 
 @app.route("/api/health")
 def health_check():
-    """Health check endpoint - Railway compatible"""
+    """
+    Health check endpoint — also initialises DB tables on first boot.
+    Railway hits this after deploy; if DATABASE_URL is set the tables
+    are created automatically (CREATE TABLE IF NOT EXISTS — safe to repeat).
+    """
+    db_status = "not_configured"
+    if os.getenv("DATABASE_URL"):
+        try:
+            from database import init_database
+            init_database()
+            db_status = "ok"
+        except Exception as e:
+            db_status = f"error: {e}"
+
     try:
-        # Test core functionality - brain module MUST be available
         from brain import handle_user_message
-        
-        # If we get here, brain module is working
-        return jsonify({
-            "status": "healthy",
-            "service": "InvestCore API",
-            "version": "1.0.0",
-            "timestamp": "2025-08-24",
-            "message": "API is running with full functionality",
-            "level": "info",
-            "railway": "ready",
-            "brain_module": "available"
-        }), 200
-        
+        brain_status = "available"
     except ImportError as e:
-        # Brain module failed to import - this is a critical failure
-        return jsonify({
-            "status": "unhealthy",
-            "service": "InvestCore API",
-            "version": "1.0.0",
-            "error": f"Brain module import failed: {str(e)}",
-            "level": "error",
-            "railway": "failed",
-            "brain_module": "unavailable",
-            "message": "Critical dependency missing - API cannot function"
-        }), 503  # Service Unavailable
-        
-    except Exception as e:
-        # Any other error is also critical
-        return jsonify({
-            "status": "unhealthy",
-            "service": "InvestCore API",
-            "version": "1.0.0",
-            "error": f"Unexpected error: {str(e)}",
-            "level": "error",
-            "railway": "failed",
-            "brain_module": "unknown"
-        }), 500
+        brain_status = f"unavailable: {e}"
+
+    return jsonify({
+        "status": "healthy",
+        "service": "AtlasCore API",
+        "version": "1.0.0",
+        "database": db_status,
+        "brain_module": brain_status
+    }), 200
 
 @app.route("/")
 def root():

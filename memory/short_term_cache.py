@@ -2,23 +2,19 @@
 Short-term memory: recent conversation + current cache for stateful agent.
 Postgres-backed; use DATABASE_URL (e.g. Railway).
 """
-import psycopg2
 import os
+import sys
 import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Any
 
-from dotenv import load_dotenv
-load_dotenv()
+# Project root for database import
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from database import get_db_connection
 
 SHORT_TERM_DB = "short_term_memory"
 MAX_RECENT_MESSAGES = 20
 EXPIRY_HOURS = 24
-
-
-def get_db_connection():
-    """Connection using Railway-injected DATABASE_URL."""
-    return psycopg2.connect(os.getenv("DATABASE_URL"))
 
 
 def add_to_recent_conversation(user_id: str, message: str) -> bool:
